@@ -1,0 +1,43 @@
+<?php
+
+namespace App\Http\Resources\Common;
+
+use App\Http\Resources\Auth\Owner;
+use App\Events\Api\ResourceShowing;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class Company extends JsonResource
+{
+    /**
+     * Transform the resource into an array.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return array|\Illuminate\Contracts\Support\Arrayable|\JsonSerializable
+     */
+    public function toArray($request)
+    {
+        $resources = [
+            'id' => $this->id,
+            'name' => $this->name,
+            'email' => $this->email,
+            'currency' => $this->currency,
+            'domain' => $this->domain,
+            'address' => $this->address,
+            'logo' => $this->logo,
+            'enabled' => $this->enabled,
+            'created_at' => $this->created_at ? $this->created_at->toIso8601String() : '',
+            'updated_at' => $this->updated_at ? $this->updated_at->toIso8601String() : '',
+            'created_from' => $this->created_from,
+            'owner' => Owner::from($this->owner),
+        ];
+
+        $event = new ResourceShowing($this->resource);
+        event($event);
+
+        if (! empty($event->resources)) {
+            $resources = array_merge($resources, $event->resources);
+        }
+
+        return $resources;
+    }
+}

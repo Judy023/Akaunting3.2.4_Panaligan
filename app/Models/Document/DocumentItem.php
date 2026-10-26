@@ -1,0 +1,170 @@
+<?php
+
+namespace App\Models\Document;
+
+use App\Abstracts\Model;
+use App\Traits\Currencies;
+use Bkwld\Cloner\Cloneable;
+use Illuminate\Database\Eloquent\Builder;
+
+class DocumentItem extends Model
+{
+    use Cloneable, Currencies;
+
+    protected $table = 'document_items';
+
+    /**
+     * The relationships that should always be loaded.
+     *
+     * @var array
+     */
+    protected $with = ['taxes'];
+
+    protected $appends = ['discount', 'tax_ids', 'tax_rates'];
+
+    protected $fillable = [
+        'company_id',
+        'type',
+        'document_id',
+        'item_id',
+        'category_id',
+        'name',
+        'description',
+        'quantity',
+        'price',
+        'total',
+        'tax',
+        'discount_rate',
+        'discount_type',
+        'created_from',
+        'created_by',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array
+     */
+    protected $casts = [
+        'price'         => 'double',
+        'total'         => 'double',
+        'tax'           => 'double',
+        'discount_rate' => 'double',
+        'deleted_at'    => 'datetime',
+    ];
+
+    /**
+     * @var array
+     */
+    public $cloneable_relations = ['taxes'];
+
+    public static function boot()
+    {
+        parent::boot();
+
+        static::saving(function ($model) {
+            $model->offsetUnset('tax_ids');
+            $model->offsetUnset('tax_rates');
+        });
+    }
+
+    public function document()
+    {
+        return $this->belongsTo('App\Models\Document\Document')->withoutGlobalScope('App\Scopes\Document');
+    }
+
+    public function item()
+    {
+        return $this->belongsTo('App\Models\Common\Item')->withDefault(['name' => trans('general.na')]);
+    }
+
+    public function category()
+    {
+        return $this->belongsTo('App\Models\Setting\Category')->withoutGlobalScope('App\Scopes\Category')->withDefault(['name' => trans('general.na')]);
+    }
+
+    public function taxes()
+    {
+        return $this->hasMany('App\Models\Document\DocumentItemTax', 'document_item_id', 'id');
+    }
+
+    public function scopeType(Builder $query, string $type)
+    {
+        return $query->where($this->qualifyColumn('type'), '=', $type);
+    }
+
+    public function scopeInvoice(Builder $query)
+    {
+        return $query->where($this->qualifyColumn('type'), '=', Document::INVOICE_TYPE);
+    }
+
+    public function scopeInvoiceRecurring(Builder $query): Builder
+    {
+        return $query->where($this->qualifyColumn('type'), '=', Document::INVOICE_RECURRING_TYPE)
+                    ->whereHas('document.recurring', function (Builder $query) {
+                        $query->whereNull('deleted_at');
+                    });
+    }
+
+    public function scopeBill(Builder $query)
+    {
+        return $query->where($this->qualifyColumn('type'), '=', Document::BILL_TYPE);
+    }
+
+    public function scopeBillRecurring(Builder $query): Builder
+    {
+        return $query->where($this->qualifyColumn('type'), '=', Document::BILL_RECURRING_TYPE)
+                    ->whereHas('document.recurring', function (Builder $query) {
+                        $query->whereNull('deleted_at');
+                    });
+    }
+
+    public function getDiscountAttribute(): string
+    {
+        if (setting('localisation.percent_position', 'after') === 'after') {
+            $text = ($this->discount_type === 'normal') ? $this->discount_rate . '%' : $this->discount_rate;
+        } else {
+            $text = ($this->discount_type === 'normal') ? '%' . $this->discount_rate : $this->discount_rate;
+        }
+
+        return $text;
+    }
+
+    public function getDiscountRateAttribute($value = 0)
+    {
+        $discount_rate = 0;
+
+        switch (setting('localisation.discount_location', 'total')) {
+            case 'no':
+            case 'total':
+                $discount_rate = 0;
+                break;
+            case 'both':
+            case 'item':
+                $discount_rate = $value;
+                break;
+        }
+
+        return $discount_rate;
+    }
+
+    public function getTaxIdsAttribute(): array
+    {
+        return $this->taxes->pluck('tax_id')->all();
+    }
+
+    /**
+     * The rate each tax was actually charged at, keyed by tax id, so the form
+     * can post it back instead of the tax's current rate.
+     */
+    public function getTaxRatesAttribute(): array
+    {
+        return $this->taxes->pluck('rate', 'tax_id')->all();
+    }
+
+    public function onCloning($src, $child = null)
+    {
+        unset($this->tax_ids);
+        unset($this->tax_rates);
+    }
+}
